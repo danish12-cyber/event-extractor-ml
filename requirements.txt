@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+requests
+newspaper3k
+spacy
+sumy
+python-multipart
+lxml_html_clean
+transformers
+torch
+beautifulsoup4
+nltk
