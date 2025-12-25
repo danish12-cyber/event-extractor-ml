@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from transformers import pipeline
 import nltk
 nltk.download("punkt")
+from newspaper import Article
 
 app = FastAPI()
 
@@ -20,76 +21,26 @@ class UrlRequest(BaseModel):
 # ---- HELPER FUNCTIONS ----
 
 def extract_text_from_url(url):
-    """Extract readable text from a news article URL"""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
+    """Extract readable text from a news article URL using newspaper3k"""
     try:
-        page = requests.get(url, headers=headers, timeout=15)
-        print(f"[DEBUG] Fetching {url} - Status: {page.status_code}")
-        
-        soup = BeautifulSoup(page.text, "html.parser")
-
-        # remove scripts, styles, nav, footer
-        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript"]):
-            tag.decompose()
-
-        # Strategy 1: Look for <article> tag
-        article = soup.find("article")
-        if article:
-            text = article.get_text(" ", strip=True)
-            if len(text) > 100:
-                print(f"[DEBUG] Strategy 1 (article) success: {len(text)} chars")
-                return text
-
-        # Strategy 2: Look for main content divs
-        main_div = soup.find("div", {"id": ["content", "main", "story-body", "article-body", "post-content"]}) or \
-                   soup.find("div", {"class": ["content", "main", "story-body", "article-body", "post-content", "entry-content"]})
-        if main_div:
-            text = main_div.get_text(" ", strip=True)
-            if len(text) > 100:
-                print(f"[DEBUG] Strategy 2 (div) success: {len(text)} chars")
-                return text
-
-        # Strategy 3: Fallback - all paragraphs
-        paragraphs = soup.find_all("p")
-        text = " ".join([p.get_text() for p in paragraphs])
-        if len(text) > 50:
-             print(f"[DEBUG] Strategy 3 (paragraphs) success: {len(text)} chars")
-             return text
-        
-        # Strategy 4: Last Resort - Whole Body Text
-        if soup.body:
-            text = soup.body.get_text(" ", strip=True)
-            print(f"[DEBUG] Strategy 4 (body) used: {len(text)} chars")
-            return text
-
-        return ""
+        article = Article(url)
+        article.download()
+        article.parse()
+        return article.text
     except Exception as e:
-        print(f"[ERROR] Extraction failed: {e}")
+        print(f"Error extracting text: {e}")
         return ""
 
 
-def extract_publish_date(html):
-    """Extract publish date from meta tags"""
-    soup = BeautifulSoup(html, "html.parser")
-    
-    # List of common meta tags for publish date
-    meta_tags = [
-        {"property": "article:published_time"},
-        {"property": "og:published_time"},
-        {"name": "date"},
-        {"name": "pubdate"},
-        {"name": "publish-date"},
-        {"itemprop": "datePublished"}
-    ]
-    
-    for tag in meta_tags:
-        meta = soup.find("meta", tag)
-        if meta and meta.get("content"):
-            return meta["content"]
-            
-    return "Unknown"
+def extract_publish_date(url):
+    """Extract publish date using newspaper3k"""
+    try:
+        article = Article(url)
+        article.download()
+        article.parse()
+        return str(article.publish_date) if article.publish_date else "Unknown"
+    except Exception:
+        return "Unknown"
 
 
 def extract_events_from_text(text):
@@ -129,7 +80,7 @@ async def extract_data(payload: UrlRequest):
     summary = summarizer(article_text[:4000], max_length=130, min_length=30, do_sample=False)[0]['summary_text']
 
     # step 4: extract publish date
-    publish_date = extract_publish_date(html)
+    publish_date = extract_publish_date(payload.url)
 
     # step 5: extract events (NER based)
     events = extract_events_from_text(article_text[:1000])
